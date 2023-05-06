@@ -4,7 +4,7 @@ import glob
 import os
 
 
-class SorterCam:
+class SorterCamera:
     __calibration_image_prefix = "chessboard_"
     __calibration_image_extension = "png"
 
@@ -24,7 +24,7 @@ class SorterCam:
     def __take_raw_image(self):
         """ __take_raw_image() -> img
 
-        @brief Take an image from the ip camera 
+        @brief Take an image from the ip camera
         """
         vcap = cv2.VideoCapture(self.__url)
         _, img = vcap.read()
@@ -36,7 +36,7 @@ class SorterCam:
         """take_calibration_images() -> None
         @brief Take 10 images and save them on the harddrive.
                 Next image is taken on keypress or after 3s.
-                Use those images wih calibrate().    
+                Use those images wih calibrate().
         """
         if not os.path.exists(self.__calibration_path):
             os.makedirs(self.__calibration_path)
@@ -68,7 +68,7 @@ class SorterCam:
         ret, corners = cv2.findChessboardCorners(
             img, size, cv2.CALIB_CB_ADAPTIVE_THRESH)
         # If found, add object points, image points (after refining them)
-        #TODO: remove or refactor
+        # TODO: remove or refactor
         if len(img.shape) > 2:
             img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         if ret == True:
@@ -93,7 +93,7 @@ class SorterCam:
         @brief Load camera calibration from npy files stored in the calibration folder
         """
         self.r_vecs = self.__load_calibration_value("r_vecs")
-        self.t_vecs = self.__load_calibration_value("r_vecs")
+        self.t_vecs = self.__load_calibration_value("t_vecs")
 
     def calibrate(self, size):
         """calibrate(size) -> retval
@@ -208,3 +208,38 @@ class SorterCam:
 
         cv2.imshow('img', img)
         cv2.waitKey(2000)
+
+    def get_word_coordinates(self, x, y):
+        """get_word_coordinates(x,y)
+
+        @brief Get real world coordinates with z=0 from screen coordinates x and y
+        """
+        self.__load_camera_calibration()
+        self.__load_position_calibration()
+
+        # https://answers.opencv.org/question/62779/image-coordinate-to-world-coordinate-opencv/
+        # https://www.fdxlabs.com/calculate-x-y-z-real-world-coordinates-from-a-single-camera-using-opencv/
+        # https://stackoverflow.com/questions/12299870/computing-x-y-coordinate-3d-from-image-point
+
+        # using the pinhole camera model
+        # s * [u,v,1] = M * ( R * [X,Y,Zconst] + t)
+        # with s: scaling, M: camera matrix, R: roation matrix, t: translation vector
+        uv1 = np.array([x, y, 1])
+        # get inverse of camera matrix
+        _, inv_intrinsic = cv2.invert(self.newcameramtx)
+        # get rotation matrix from rotation vector and invert it
+        rot, _ = cv2.Rodrigues(self.r_vecs)
+        _, inv_rot = cv2.invert(rot)
+
+        # => s * (R^-1)*(M^-1)*[u,v,1] = [X,Y,Z] + (R^-1)*t
+        # => s * left = right
+        left = inv_rot.dot(inv_intrinsic.dot(uv1))
+        right = inv_rot.dot(self.t_vecs)
+        # find scaling factor so that z = 0
+        z_const = 0
+        # only using the z (i.e. "2") component of the vectors left and right
+        s = (z_const + right[2])/left[2]
+
+        #  => [X,Y,Z] = s * (R^-1)*((M^-1)*[u,v,1] - t)
+        pos = inv_rot.dot(s * inv_intrinsic.dot(uv1)-self.t_vecs)
+        return pos[0:2]
